@@ -136,18 +136,25 @@ def evaluate_predictions(predictions, labels=None, k=3):
     prediction record must carry its own target (``target_move``) and
     optionally a target value.
     """
+    by_id = {}
     by_fen = {}
     if labels is not None:
         for label in labels:
+            if "sample_id" in label:
+                by_id[label["sample_id"]] = label
             if isinstance(label.get("fen"), str):
-                by_fen[label["fen"]] = label
+                by_fen.setdefault(label["fen"], label)
 
     ranked = []
     targets = []
     pred_values = []
     true_values = []
     for record in predictions:
-        label = by_fen.get(record.get("fen")) if labels is not None else record
+        label = record
+        if labels is not None:
+            label = by_id.get(record.get("sample_id"))
+            if label is None:
+                label = by_fen.get(record.get("fen"))
         if labels is not None and label is None:
             continue
         target = _target(label)

@@ -143,6 +143,57 @@ def split(inp, out_dir, train, val, test, seed, shuffle):
         click.echo(f"{name}: {len(rows)} games -> {path}")
 
 
+@cli.command()
+@click.option("--input", "inp", required=True, help="Games JSONL file.")
+@click.option("--out-dir", default="data/prepared", help="Directory for encoded split files.")
+@click.option("--train", default=0.8, type=float, help="Train ratio.")
+@click.option("--val", default=0.1, type=float, help="Validation ratio.")
+@click.option("--test", default=0.1, type=float, help="Test ratio.")
+@click.option("--seed", default=0, type=int, help="Shuffle seed.")
+@click.option("--shuffle/--no-shuffle", default=True, help="Shuffle games before splitting.")
+def prepare(inp, out_dir, train, val, test, seed, shuffle):
+    """Split games, encode positions, and attach each next-move target."""
+    games = read_jsonl(inp)
+    for game_index, game in enumerate(games):
+        if game.get("game_id") is None:
+            game["game_id"] = game_index
+    try:
+        parts = split_records(games, train, val, test, seed, shuffle)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    os.makedirs(out_dir, exist_ok=True)
+    for name, split_games in parts.items():
+        samples = []
+        for game in split_games:
+            game_id = game["game_id"]
+            positions = game.get("positions", [])
+            moves = game.get("moves", [])
+            if len(positions) != len(moves) + 1:
+                raise click.ClickException(
+                    "each game must have one more position than moves"
+                )
+            for ply, (fen, move) in enumerate(zip(positions, moves)):
+                encoded = _serialize_position(encode_position(fen))
+                samples.append({
+                    "sample_id": f"{game_id}:{ply}",
+                    "game_id": game_id,
+                    "ply": ply,
+                    "fen": fen,
+                    "target_move": move,
+                    "shape": encoded["shape"],
+                    "tensor": encoded["tensor"],
+                })
+        path = os.path.join(out_dir, f"{name}.jsonl")
+        write_jsonl(path, samples, metadata={
+            "split": name,
+            "seed": seed,
+            "num_games": len(split_games),
+            "num_samples": len(samples),
+        })
+        click.echo(f"{name}: {len(samples)} positions from {len(split_games)} games -> {path}")
+
+
 @cli.command(name="eval")
 @click.option("--predictions", default=None, help="Predictions JSONL file.")
 @click.option("--labels", default=None, help="Optional labels JSONL file matched by FEN.")

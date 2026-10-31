@@ -1,197 +1,149 @@
-# chess-training-gym
+# Chess Training Gym
 
-Utilities for building small chess training datasets: synthetic game
-generation, position encoding, dataset splitting, evaluation and reporting.
-Pure Python core. `numpy` and `torch` are optional.
+Chess Training Gym is a small data-preparation and evaluation toolkit for
+people who already have chess games and a model they want to train or test.
+It converts game records into encoded board positions with next-move targets,
+keeps all positions from a game in one split, and scores predictions from your
+own model.
 
-## Install
+It is not a chess engine and it does not train a neural network. Bring your
+own games, training loop, model and inference code.
 
-```bash
-python -m pip install -e . --no-cache-dir
+## Try the complete example
+
+The repository includes four short, legal opening lines and a fixed prediction
+file. This workflow summarizes the source data, creates encoded train,
+validation and test files, then evaluates predictions against labels from the
+held-out test split. It runs without NumPy or PyTorch.
+
+Install the project once:
+
+```console
+python -m pip install -e .
 ```
 
-With optional dependencies:
+Run this from the repository root:
 
-```bash
-python -m pip install -e ".[numpy]" --no-cache-dir
-python -m pip install -e ".[torch]" --no-cache-dir
-python -m pip install -e ".[dev]" --no-cache-dir
+```console
+python -m chess_training_gym stats --input examples/tiny_games.jsonl --json
+python -m chess_training_gym prepare --input examples/tiny_games.jsonl --out-dir .tmp/tiny-prepared --train 0.5 --val 0 --test 0.5 --seed 17
+python -m chess_training_gym eval --predictions examples/tiny_demo_predictions.jsonl --labels .tmp/tiny-prepared/test.jsonl --k 3 --out .tmp/tiny-eval.json
 ```
 
-Python 3.9 or newer. The CLI is available as `chess-gym` and
-`chess-training-gym`, and as `python -m chess_training_gym`.
+`prepare` performs the split and encoding together. It writes `train.jsonl`,
+`val.jsonl` and `test.jsonl` into `.tmp/tiny-prepared`. Each data row includes
+a stable `sample_id`, game ID, ply, FEN, next move target, tensor shape and
+the encoded tensor. The split is done by whole games, so a position from one
+game cannot leak into another split. The example uses no validation games to
+keep the sample small. Use a nonzero validation ratio for model selection.
 
-## Commands
+The example predictions are fixed output from the included `MockedModel`,
+provided to demonstrate file formats and metric calculation. They are not
+real model output. The opening lines are not a useful training corpus.
+Evaluation reports top-1 and top-k move accuracy. Value correlation is 0.0
+because these samples have no engine evaluation labels.
 
-```bash
-chess-gym --help
-```
+## Use your games and model
 
-### generate
+### 1. Export your games
 
-Generate random legal games. Output is JSONL, one game per line.
-
-```bash
-chess-gym generate --num-games 20 --seed 1 --max-plies 60 --out data/games.jsonl
-```
-
-A metadata line is written first unless `--no-metadata` is passed:
+Provide JSONL, one game per line. Every game needs a `moves` list of UCI moves
+and a `positions` list containing the FEN before each move plus the final FEN.
+There must be exactly one more position than moves. For example:
 
 ```json
-{"generator": "chess-training-gym", "max_plies": 60, "num_games": 20, "seed": 1, "type": "metadata"}
+{"game_id": "game-001", "moves": ["e2e4", "e7e5"], "positions": ["<FEN before e2e4>", "<FEN before e7e5>", "<FEN after e7e5>"]}
 ```
 
-Each game is deterministic for a given `seed` and game index.
+FEN strings must be valid. UCI promotions include the promotion piece, such as
+`a7a8q`. Your data should contain positions paired with meaningful moves. The
+synthetic `generate` command is useful for testing file handling, not for
+making chess training data.
 
-### stats
+### 2. Check and prepare it
 
-```bash
-chess-gym stats --input data/games.jsonl
+```console
 chess-gym stats --input data/games.jsonl --json --out data/stats.json
+chess-gym prepare --input data/games.jsonl --out-dir data/prepared --train 0.8 --val 0.1 --test 0.1 --seed 7
 ```
 
-Prints game count, position count, average game length and result
-distribution.
+The prepared files are JSONL. Each row has `fen`, `target_move`, and `tensor`
+with shape `(13, 8, 8)`. Planes 0 through 5 represent white pawn, knight,
+bishop, rook, queen and king. Planes 6 through 11 represent the same black
+pieces. Plane 12 is all ones when white is to move and all zeros when black is
+to move. Castling rights, en passant, move counters and move history are not
+encoded. The FEN is preserved alongside the tensor.
 
-### split
+Use the train rows in your training loop and the validation rows for model
+selection. The tool only prepares examples. Your training loop decides the
+loss, optimizer, batching and checkpoints.
 
-Split a JSONL file into train/val/test. Records are shuffled with `seed`
-unless `--no-shuffle` is passed.
+### 3. Run your model on test rows
 
-```bash
-chess-gym split --input data/games.jsonl --out-dir data/splits \
-  --train 0.8 --val 0.1 --test 0.1 --seed 7
+Your inference adapter reads `data/prepared/test.jsonl` and writes one JSONL
+prediction per input row. Keep `sample_id` and `fen` from the input. `moves`
+must be your ranked UCI move guesses, best first. `predicted_value` is optional.
+
+```json
+{"sample_id": "game-001:0", "fen": "<same FEN>", "moves": ["e2e4", "d2d4"], "predicted_value": 0.2}
 ```
 
-Writes `train.jsonl`, `val.jsonl` and `test.jsonl`. Each file starts with a
-metadata line that records the split name, seed and record count. The ratios
-must sum to 1.0. Every input record goes to exactly one output file.
+When the model has a value head, add matching `value` fields to your original
+game-position labels or supply labels with `sample_id`, `fen`, `target_move`
+and `value`. The `prepare` output already has move labels and matching sample
+IDs. Evaluate the predictions against that held-out split:
 
-### encode
-
-Encode FEN positions into a `(13, 8, 8)` tensor. Planes 0 to 5 are white
-pawn, knight, bishop, rook, queen and king. Planes 6 to 11 are the black
-pieces in the same order. Plane 12 is 1.0 when white is to move, 0.0
-otherwise.
-
-Single FEN:
-
-```bash
-chess-gym encode --fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+```console
+chess-gym eval --predictions data/my-predictions.jsonl --labels data/prepared/test.jsonl --k 3 --out data/eval.json
+chess-gym report --input data/eval.json --out data/eval-report.md
 ```
 
-JSONL input, one encoded record per line:
+Labels are matched by `sample_id` when present, otherwise by FEN. Stable IDs
+matter when the same FEN appears more than once with different recorded
+moves. The evaluator does not check whether model moves are legal.
 
-```bash
+## Other commands
+
+Generate random legal games for plumbing tests:
+
+```console
+chess-gym generate --num-games 20 --seed 1 --max-plies 60 --out data/random-games.jsonl
+```
+
+Split raw game records without encoding:
+
+```console
+chess-gym split --input data/games.jsonl --out-dir data/splits --train 0.8 --val 0.1 --test 0.1 --seed 7
+```
+
+Encode positions from an existing FEN, JSON or JSONL file:
+
+```console
 chess-gym encode --input data/games.jsonl --out data/encoded.jsonl --format jsonl
 ```
 
-`--input` accepts:
+The Python API exposes `generate_games`, `fen_to_tensor`, `split_records`,
+`compute_stats`, `evaluate_predictions` and related helpers. Install the
+optional `numpy` extra for NumPy arrays or `torch` extra for `to_torch`.
 
-- one FEN per line
-- a JSON array of FEN strings
-- a JSON object with a `positions` array
-- JSONL where each record has `fen` or `positions`
+## Scope and limits
 
-### eval
-
-Evaluate the built-in mock model on synthetic data:
-
-```bash
-chess-gym eval --num-positions 100 --seed 1 --k 3 --out data/eval.json
-```
-
-Evaluate a predictions file:
-
-```bash
-chess-gym eval --predictions data/predictions.jsonl \
-  --labels data/labels.jsonl --k 3 --out data/eval.json
-```
-
-Labels are matched by `fen`. Without `--labels`, each prediction record must
-contain its own target.
-
-Output fields: `num_samples`, `top_1_accuracy`, `top_k`,
-`top_k_accuracy`, `value_samples` and `value_correlation`.
-
-### report
-
-```bash
-chess-gym report --input data/eval.json --out report.md
-chess-gym report --input data/eval.json --out report.json --format json
-```
-
-## Data format
-
-Game record:
-
-```json
-{
-  "game_id": 0,
-  "seed": 1,
-  "moves": ["e2e4", "e7e5"],
-  "positions": ["<start FEN>", "<FEN after e2e4>", "<FEN after e7e5>"],
-  "result": "max_plies",
-  "num_plies": 2
-}
-```
-
-`result` is one of `checkmate`, `stalemate` or `max_plies`.
-`len(positions) == num_plies + 1`. Moves use UCI notation. Promotions use a
-fifth character, for example `a7a8q`.
-
-Prediction record:
-
-```json
-{"fen": "<FEN>", "moves": ["e2e4", "d2d4"], "predicted_value": 0.2}
-```
-
-`moves` is ranked best first. `policy` and `top_moves` are also accepted.
-`predicted_value` is optional.
-
-Label record:
-
-```json
-{"fen": "<FEN>", "target_move": "e2e4", "value": 0.1}
-```
-
-`target`, `best_move`, `label` and `move` are accepted as target keys. Values
-are compared only when both a prediction value and a label value are present.
-Pearson correlation is 0.0 when it is undefined for the given sample.
-
-## Python API
-
-```python
-from chess_training_gym import generate_games, fen_to_tensor, split_records, compute_stats
-
-games = generate_games(num_games=5, seed=0, max_plies=40)
-tensor = fen_to_tensor("8/8/8/8/8/8/8/K6k w - - 0 1")
-parts = split_records(games, train=0.8, val=0.1, test=0.1, seed=0)
-print(compute_stats(games))
-```
-
-`to_torch(tensor)` converts a tensor-like value when `torch` is installed.
-
-## Limitations
-
-- Games are random legal moves. They are not useful as training targets.
-- `MockedModel` returns pseudo-random moves and values. It exists to test the
-  evaluation pipeline, not to play chess.
-- Move generation is plain Python and slow. Depth 3 perft from the start
-  position is covered by tests, but this is not an engine.
-- No repetition, fifty-move or insufficient material detection. Games stop on
-  checkmate, stalemate or `max_plies`.
-- No SAN, PGN, UCI engine protocol, opening book or tablebase support.
-- Encoded positions have no move history or castling planes.
-- Datasets are read into memory. Large files need a different reader.
+- This project prepares data and scores predictions. It does not train or
+  save a model.
+- Randomly generated games are legal move sequences, not sensible chess play
+  or good training targets.
+- Move accuracy measures agreement with recorded moves, not chess strength.
+- Value correlation requires value labels and predictions. It is 0.0 when
+  there are too few samples or either side has no variance.
+- The included board code is a small pure Python implementation, not an
+  engine. It does not detect repetition, the fifty-move rule or insufficient
+  material, and does not support PGN or UCI engine communication.
+- Data is read into memory. Use a different pipeline for very large corpora.
 
 ## Development
 
-```bash
-python -m pip install -e ".[dev]" --no-cache-dir
+```console
+python -m pip install -e ".[dev]"
 pytest -q
 python tools/check_text.py
 ```
-
-`tools/check_text.py` fails on em dashes, en dashes and a list of filler
-phrases. CI runs it before the test suite.

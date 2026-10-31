@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -100,6 +101,63 @@ def test_split_bad_ratios(tmp_path):
     games.write_text('{"game_id": 0}\n', encoding="utf-8")
     result = run(["split", "--input", str(games), "--train", "0.5", "--val", "0.1", "--test", "0.1"])
     assert result.exit_code != 0
+
+
+def test_prepare_creates_encoded_move_targets_without_game_leakage(tmp_path):
+    games = tmp_path / "games.jsonl"
+    run(["generate", "-n", "10", "--seed", "4", "--max-plies", "6", "--out", str(games)])
+    out_dir = tmp_path / "prepared"
+
+    result = run([
+        "prepare", "--input", str(games), "--out-dir", str(out_dir),
+        "--train", "0.6", "--val", "0.2", "--test", "0.2", "--seed", "7",
+    ])
+
+    assert result.exit_code == 0, result.output
+    records = {}
+    for split_name in ("train", "val", "test"):
+        path = out_dir / f"{split_name}.jsonl"
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        assert rows[0]["split"] == split_name
+        records[split_name] = rows[1:]
+        assert records[split_name]
+        assert all(row["target_move"] and row["fen"] for row in records[split_name])
+        assert all(row["shape"] == [13, 8, 8] for row in records[split_name])
+
+    game_ids = {name: {row["game_id"] for row in rows} for name, rows in records.items()}
+    assert game_ids["train"].isdisjoint(game_ids["val"])
+    assert game_ids["train"].isdisjoint(game_ids["test"])
+    assert game_ids["val"].isdisjoint(game_ids["test"])
+    assert sum(map(len, records.values())) == 60
+
+
+def test_tiny_example_runs_through_stats_prepare_and_eval(tmp_path):
+    examples = Path(__file__).parents[1] / "examples"
+    games = examples / "tiny_games.jsonl"
+    predictions = examples / "tiny_demo_predictions.jsonl"
+    out_dir = tmp_path / "prepared"
+
+    stats = run(["stats", "--input", str(games), "--json"])
+    assert stats.exit_code == 0, stats.output
+    assert json.loads(stats.output)["games"] == 4
+
+    prepared = run([
+        "prepare", "--input", str(games), "--out-dir", str(out_dir),
+        "--train", "0.5", "--val", "0", "--test", "0.5", "--seed", "17",
+    ])
+    assert prepared.exit_code == 0, prepared.output
+
+    result_file = tmp_path / "eval.json"
+    evaluated = run([
+        "eval", "--predictions", str(predictions),
+        "--labels", str(out_dir / "test.jsonl"), "--k", "3",
+        "--out", str(result_file),
+    ])
+    assert evaluated.exit_code == 0, evaluated.output
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["num_samples"] == 12
+    assert result["top_k"] == 3
+    assert result["top_k_accuracy"] >= result["top_1_accuracy"]
 
 
 def test_eval_command(tmp_path):

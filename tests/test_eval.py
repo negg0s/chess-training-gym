@@ -57,6 +57,22 @@ def test_evaluate_predictions_self_contained():
     assert res["value_samples"] == 0
 
 
+def test_evaluate_predictions_matches_sample_ids_when_fens_repeat():
+    predictions = [
+        {"sample_id": "g1:0", "fen": "same", "moves": ["e2e4"]},
+        {"sample_id": "g2:0", "fen": "same", "moves": ["d2d4"]},
+    ]
+    labels = [
+        {"sample_id": "g1:0", "fen": "same", "target_move": "e2e4"},
+        {"sample_id": "g2:0", "fen": "same", "target_move": "d2d4"},
+    ]
+
+    result = evaluate_predictions(predictions, labels=labels, k=1)
+
+    assert result["num_samples"] == 2
+    assert result["top_1_accuracy"] == 1.0
+
+
 def test_mock_model_returns_legal_moves():
     from chess_training_gym.board import START_FEN, legal_moves, parse_fen
 
