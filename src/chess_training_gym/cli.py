@@ -2,13 +2,40 @@
 
 import json
 import os
+
 import click
 
+from .board import START_FEN
+from .dataset import compute_stats, read_jsonl, split_records, write_jsonl
+from .encode import encode_position, read_positions
+from .eval import (
+    build_synthetic_dataset,
+    evaluate_model,
+    evaluate_predictions_file,
+)
 from .generate import generate_games, write_games
-from .encode import fen_to_tensor, encode_position, batch_encode
-from .eval import evaluate_model, build_synthetic_dataset
 from .models import MockedModel
-from .report import generate_report, write_report, read_results
+from .report import read_results, write_report
+
+
+def _ensure_parent(path):
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
+def _tensor_as_list(tensor):
+    if hasattr(tensor, "tolist"):
+        return tensor.tolist()
+    return tensor
+
+
+def _serialize_position(position):
+    return {
+        "fen": position["fen"],
+        "shape": list(position["shape"]),
+        "tensor": _tensor_as_list(position["tensor"]),
+    }
 
 
 @click.group()
@@ -20,102 +47,139 @@ def cli():
 @click.option("--num-games", "-n", default=10, type=int, help="Number of games.")
 @click.option("--seed", default=0, type=int, help="Random seed.")
 @click.option("--max-plies", default=80, type=int, help="Max plies per game.")
-@click.option("--out", default="data/games.jsonl", help="Output file.")
-def generate(num_games, seed, max_plies, out):
-    """Generate synthetic games."""
+@click.option("--out", default="data/games.jsonl", help="Output JSONL file.")
+@click.option("--metadata/--no-metadata", default=True, help="Write a metadata header line.")
+def generate(num_games, seed, max_plies, out, metadata):
+    """Generate synthetic games as JSONL."""
     games = generate_games(num_games=num_games, seed=seed, max_plies=max_plies)
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    write_games(out, games)
+    _ensure_parent(out)
+    header = None
+    if metadata:
+        header = {
+            "generator": "chess-training-gym",
+            "seed": seed,
+            "num_games": len(games),
+            "max_plies": max_plies,
+        }
+    write_games(out, games, metadata=header)
     click.echo(f"Generated {len(games)} games -> {out}")
 
 
 @cli.command()
-@click.option("--fen", default=None, help="Single FEN to encode.")
-@click.option("--input", "inp", default=None, help="Input file (json/jsonl with FENs or games).")
-@click.option("--out", default=None, help="Output file (json).")
-def encode(fen, inp, out):
+@click.option("--fen", multiple=True, help="FEN to encode; may be repeated.")
+@click.option("--input", "inp", default=None, help="FEN file, JSON or JSONL input.")
+@click.option("--out", default=None, help="Output file.")
+@click.option("--format", "fmt", type=click.Choice(["json", "jsonl"]), default="json")
+def encode(fen, inp, out, fmt):
     """Encode positions (FEN -> tensors)."""
-    fens = []
-    if fen:
-        fens.append(fen)
+    fens = list(fen)
     if inp:
-        with open(inp, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-        try:
-            data = json.loads(content)
-            if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, str):
-                        fens.append(item)
-                    elif isinstance(item, dict):
-                        if "fen" in item:
-                            fens.append(item["fen"])
-                        elif "positions" in item:
-                            fens.extend(item["positions"])
-            elif isinstance(data, dict) and "positions" in data:
-                fens.extend(data["positions"])
-        except json.JSONDecodeError:
-            # jsonl
-            for line in content.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if isinstance(obj, str):
-                        fens.append(obj)
-                    elif isinstance(obj, dict):
-                        if "fen" in obj:
-                            fens.append(obj["fen"])
-                        elif "positions" in obj:
-                            fens.extend(obj["positions"])
-                except json.JSONDecodeError:
-                    fens.append(line)
+        fens.extend(read_positions(inp))
     if not fens:
-        fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]
-    tensors = [encode_position(f) for f in fens]
-    # make json serializable: convert tensor to list
-    serializable = []
-    for t in tensors:
-        ten = t["tensor"]
-        try:
-            arr = ten.tolist()
-        except Exception:
-            arr = ten
-        serializable.append({"fen": t["fen"], "shape": list(t["shape"]), "tensor": arr})
+        fens = [START_FEN]
+    encoded = [_serialize_position(encode_position(f)) for f in fens]
     if out:
-        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-        with open(out, "w", encoding="utf-8") as f:
-            json.dump(serializable, f)
-        click.echo(f"Encoded {len(fens)} positions -> {out}")
+        _ensure_parent(out)
+        with open(out, "w", encoding="utf-8", newline="\n") as f:
+            if fmt == "jsonl":
+                for item in encoded:
+                    f.write(json.dumps(item) + "\n")
+            else:
+                json.dump(encoded, f)
+        click.echo(f"Encoded {len(encoded)} positions -> {out}")
+    elif len(encoded) == 1:
+        click.echo(json.dumps(encoded[0]))
     else:
-        click.echo(json.dumps(serializable[0] if len(serializable) == 1 else serializable)[:500])
+        click.echo(f"Encoded {len(encoded)} positions (use --out to save)")
 
 
 @cli.command()
+@click.option("--input", "inp", required=True, help="Games JSONL file.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON instead of text.")
+@click.option("--out", default=None, help="Write stats JSON to this file.")
+def stats(inp, as_json, out):
+    """Summarize a JSONL dataset."""
+    records = read_jsonl(inp)
+    summary = compute_stats(records)
+    if out:
+        _ensure_parent(out)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+    if as_json:
+        click.echo(json.dumps(summary, indent=2))
+        return
+    click.echo(f"Games: {summary['games']}")
+    positions = summary["positions"]
+    click.echo(f"Positions: {positions if positions is not None else 'n/a'}")
+    click.echo(f"Average game length: {summary['avg_game_length']:.1f} plies")
+    click.echo("Results:")
+    for name, count in summary["result_distribution"].items():
+        click.echo(f"  {name}: {count}")
+
+
+@cli.command()
+@click.option("--input", "inp", required=True, help="JSONL file to split.")
+@click.option("--out-dir", default="data/splits", help="Directory for split files.")
+@click.option("--train", default=0.8, type=float, help="Train ratio.")
+@click.option("--val", default=0.1, type=float, help="Validation ratio.")
+@click.option("--test", default=0.1, type=float, help="Test ratio.")
+@click.option("--seed", default=0, type=int, help="Shuffle seed.")
+@click.option("--shuffle/--no-shuffle", default=True, help="Shuffle before splitting.")
+def split(inp, out_dir, train, val, test, seed, shuffle):
+    """Split a JSONL dataset into train/val/test files."""
+    records = read_jsonl(inp)
+    try:
+        parts = split_records(records, train, val, test, seed, shuffle)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    os.makedirs(out_dir, exist_ok=True)
+    for name, rows in parts.items():
+        path = os.path.join(out_dir, f"{name}.jsonl")
+        write_jsonl(path, rows, metadata={
+            "split": name,
+            "seed": seed,
+            "num_games": len(rows),
+        })
+        click.echo(f"{name}: {len(rows)} games -> {path}")
+
+
+@cli.command(name="eval")
+@click.option("--predictions", default=None, help="Predictions JSONL file.")
+@click.option("--labels", default=None, help="Optional labels JSONL file matched by FEN.")
 @click.option("--num-positions", default=50, type=int, help="Synthetic positions.")
-@click.option("--seed", default=0, type=int, help="Seed.")
+@click.option("--seed", default=0, type=int, help="Seed for the synthetic run.")
 @click.option("--k", default=3, type=int, help="Top-k.")
 @click.option("--out", default="data/eval.json", help="Output results JSON.")
-def eval(num_positions, seed, k, out):
-    """Evaluate mocked model."""
-    dataset = build_synthetic_dataset(num_positions=num_positions, seed=seed)
-    model = MockedModel(seed=seed)
-    results = evaluate_model(model, dataset, k=k)
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+def eval_cmd(predictions, labels, num_positions, seed, k, out):
+    """Evaluate a model or a predictions file."""
+    if predictions:
+        results = evaluate_predictions_file(predictions, labels, k=k)
+    else:
+        dataset = build_synthetic_dataset(num_positions=num_positions, seed=seed)
+        model = MockedModel(seed=seed)
+        results = evaluate_model(model, dataset, k=k)
+    _ensure_parent(out)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
     click.echo(f"Evaluated {results['num_samples']} samples -> {out}")
-    click.echo(json.dumps(results, indent=2))
+    click.echo(
+        "top-1: {:.4f}  top-{}: {:.4f}  value pearson: {:.4f}".format(
+            results["top_1_accuracy"],
+            results["top_k"],
+            results["top_k_accuracy"],
+            results["value_correlation"],
+        )
+    )
 
 
 @cli.command()
 @click.option("--input", "inp", required=True, help="Results JSON file.")
 @click.option("--out", default="report.md", help="Output report file.")
-@click.option("--format", "fmt", default="markdown", help="markdown or json.")
+@click.option("--format", "fmt", type=click.Choice(["markdown", "json"]), default="markdown")
 def report(inp, out, fmt):
-    """Generate report from results."""
+    """Generate a report from results."""
     results = read_results(inp)
+    _ensure_parent(out)
     write_report(results, out, format=fmt)
     click.echo(f"Report written -> {out}")
 

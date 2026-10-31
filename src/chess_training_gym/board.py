@@ -12,20 +12,47 @@ PIECE_PLANES = {
 
 def parse_fen(fen):
     parts = fen.split()
+    if not parts:
+        raise ValueError("empty FEN")
+    rows = parts[0].split("/")
+    if len(rows) != 8:
+        raise ValueError("FEN placement must have 8 rows")
     board = []
-    for row in parts[0].split("/"):
+    for row in rows:
         r = []
         for ch in row:
             if ch.isdigit():
+                if ch == "0":
+                    raise ValueError("FEN rows cannot contain 0")
                 r.extend(["."] * int(ch))
-            else:
+            elif ch in PIECE_PLANES:
                 r.append(ch)
+            else:
+                raise ValueError(f"unexpected FEN character: {ch!r}")
+        if len(r) != 8:
+            raise ValueError("FEN row must describe 8 squares")
         board.append(r)
     side = parts[1] if len(parts) > 1 else "w"
+    if side not in ("w", "b"):
+        raise ValueError(f"invalid side to move: {side!r}")
     castling = parts[2] if len(parts) > 2 else "-"
     ep = parts[3] if len(parts) > 3 else "-"
-    halfmove = int(parts[4]) if len(parts) > 4 else 0
-    fullmove = int(parts[5]) if len(parts) > 5 else 1
+    if castling != "-" and (
+        any(right not in "KQkq" for right in castling)
+        or len(set(castling)) != len(castling)
+    ):
+        raise ValueError(f"invalid castling rights: {castling!r}")
+    if ep != "-":
+        valid_ep_rank = "6" if side == "w" else "3"
+        if len(ep) != 2 or ep[0] not in "abcdefgh" or ep[1] != valid_ep_rank:
+            raise ValueError(f"invalid en passant square: {ep!r}")
+    try:
+        halfmove = int(parts[4]) if len(parts) > 4 else 0
+        fullmove = int(parts[5]) if len(parts) > 5 else 1
+    except ValueError as exc:
+        raise ValueError("FEN move counters must be integers") from exc
+    if halfmove < 0 or fullmove < 1:
+        raise ValueError("FEN move counters must be non-negative and fullmove must be positive")
     return {
         "board": board,
         "side": side,
@@ -64,10 +91,6 @@ def to_fen(state):
     ])
 
 
-def _side_char(state):
-    return "w" if state["side"] == "w" else "b"
-
-
 def is_white(piece):
     return piece.isupper() and piece != "."
 
@@ -92,14 +115,7 @@ def find_king(board, side):
 
 
 def is_attacked(board, r, c, by_side):
-    # by_side attacks square (r,c)
-    # pawn attacks
-    if by_side == "w":
-        for dr, dc in ((-1, -1), (-1, 1)):
-            nr, nc = r - dr, c - dc  # reverse: pawn above? 
-            # white pawn sits one row below (higher index) attacking upward
-            pass
-    # simpler: iterate all enemy pieces
+    """Return True if ``by_side`` attacks square ``(r, c)``."""
     for rr in range(8):
         for cc in range(8):
             p = board[rr][cc]
@@ -210,7 +226,9 @@ def _pseudo_moves(state, r, c):
             if state["ep"] and state["ep"] != "-":
                 epr, epc = _sq_to_rc(state["ep"])
                 if (nr, nc) == (epr, epc):
-                    out.append(_uci(r, c, nr, nc))
+                    captured = board[r][nc]
+                    if captured.lower() == "p" and piece_color(captured) == opp:
+                        out.append(_uci(r, c, nr, nc))
     elif pl == "n":
         for dr, dc in ((-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)):
             nr, nc = r + dr, c + dc
