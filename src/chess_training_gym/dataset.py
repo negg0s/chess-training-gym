@@ -95,6 +95,11 @@ def compute_stats(records):
         "games": games,
         "positions": positions if positions_known else None,
         "avg_game_length": (sum(lengths) / len(lengths)) if lengths else 0.0,
+        "min_game_length": min(lengths) if lengths else 0,
+        "max_game_length": max(lengths) if lengths else 0,
         "total_plies": sum(lengths),
+        "white_wins": results.get("1-0", 0),
+        "black_wins": results.get("0-1", 0),
+        "draws": results.get("1/2-1/2", 0),
         "result_distribution": dict(sorted(results.items())),
     }

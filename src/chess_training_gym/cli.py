@@ -112,6 +112,8 @@ def stats(inp, as_json, out):
     positions = summary["positions"]
     click.echo(f"Positions: {positions if positions is not None else 'n/a'}")
     click.echo(f"Average game length: {summary['avg_game_length']:.1f} plies")
+    if summary["games"] > 0 and summary["total_plies"] > 0:
+        click.echo(f"Game length range: {summary['min_game_length']}-{summary['max_game_length']} plies")
     click.echo("Results:")
     for name, count in summary["result_distribution"].items():
         click.echo(f"  {name}: {count}")

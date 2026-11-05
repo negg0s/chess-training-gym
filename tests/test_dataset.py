@@ -59,6 +59,8 @@ def test_stats():
     assert summary["games"] == 4
     assert summary["positions"] == 2 + 3 + 4 + 5
     assert summary["avg_game_length"] == 2.5
+    assert summary["min_game_length"] == 1
+    assert summary["max_game_length"] == 4
     assert summary["result_distribution"] == {"checkmate": 2, "max_plies": 2}
 
 
