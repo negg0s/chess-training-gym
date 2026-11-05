@@ -202,3 +202,20 @@ def test_report_command(tmp_path):
     result = run(["report", "--input", str(ev), "--out", str(rep)])
     assert result.exit_code == 0, result.output
     assert rep.exists()
+
+
+
+def test_doctor_command():
+    result = run(["doctor"])
+    assert result.exit_code == 0, result.output
+    assert "[OK] python_version" in result.output
+    assert "doctor: 4/4 checks passed" in result.output
+
+
+def test_doctor_command_json():
+    result = run(["doctor", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["passed"] == 4
+    assert payload["total"] == 4
+    assert len(payload["checks"]) == 4

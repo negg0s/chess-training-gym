@@ -235,6 +235,60 @@ def report(inp, out, fmt):
     click.echo(f"Report written -> {out}")
 
 
+
+
+
+@cli.command("doctor")
+@click.option("--json", "as_json", is_flag=True, help="Output diagnostics as JSON.")
+def doctor(as_json):
+    """Run environment and component diagnostics."""
+    import sys
+    from .board import START_FEN, legal_moves, parse_fen
+    from .encode import encode_position
+
+    checks = []
+    checks.append(("python_version", True, sys.version.split()[0]))
+
+    try:
+        state = parse_fen(START_FEN)
+        moves = list(legal_moves(state))
+        checks.append(("board_engine", len(moves) == 20, f"startpos moves={len(moves)}"))
+    except Exception as exc:
+        checks.append(("board_engine", False, str(exc)))
+
+    try:
+        encoded = encode_position(START_FEN)
+        shape = tuple(encoded.get("shape", ()))
+        checks.append(("position_encoder", shape == (13, 8, 8), f"planes_shape={shape}"))
+    except Exception as exc:
+        checks.append(("position_encoder", False, str(exc)))
+
+    try:
+        import numpy as np
+        checks.append(("numpy", True, f"version={np.__version__}"))
+    except Exception as exc:
+        checks.append(("numpy", False, str(exc)))
+
+    passed = sum(1 for _, ok, _ in checks if ok)
+    if as_json:
+        payload = {
+            "checks": [{"name": name, "ok": ok, "detail": detail} for name, ok, detail in checks],
+            "passed": passed,
+            "total": len(checks),
+        }
+        click.echo(json.dumps(payload, indent=2))
+        if passed != len(checks):
+            raise SystemExit(1)
+        return
+
+    for name, ok, detail in checks:
+        status = "OK" if ok else "FAIL"
+        click.echo(f"[{status}] {name:20} {detail}")
+    click.echo(f"doctor: {passed}/{len(checks)} checks passed")
+    if passed != len(checks):
+        raise SystemExit(1)
+
+
 def main():
     cli()
 
