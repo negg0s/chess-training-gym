@@ -7,15 +7,31 @@ name = "chess-training-gym"
 version = "0.1.0"
 description = "Synthetic chess training data utilities: game generation, position encoding, model evaluation, reporting."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.9"
 dependencies = ["click>=8.0"]
 authors = [{ name = "negg0s" }]
 keywords = ["chess", "training", "synthetic", "encoding", "evaluation"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment :: Board Games",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
+[project.urls]
+Homepage = "https://github.com/negg0s/chess-training-gym"
+Repository = "https://github.com/negg0s/chess-training-gym.git"
+Issues = "https://github.com/negg0s/chess-training-gym/issues"
 
 [project.optional-dependencies]
 numpy = ["numpy>=1.23"]
