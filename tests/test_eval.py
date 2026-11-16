@@ -80,3 +80,14 @@ def test_mock_model_returns_legal_moves():
     moves = model.predict_top_moves(START_FEN, k=5)
     assert moves == MockedModel(seed=3).predict_top_moves(START_FEN, k=5)
     assert set(moves) <= set(legal_moves(parse_fen(START_FEN)))
+
+
+def test_build_synthetic_dataset_zero_range():
+    import pytest
+
+    with pytest.raises(ValueError, match="num_positions must be positive"):
+        build_synthetic_dataset(num_positions=0)
+
+    with pytest.raises(ValueError, match="num_positions must be positive"):
+        build_synthetic_dataset(num_positions=-10)
+

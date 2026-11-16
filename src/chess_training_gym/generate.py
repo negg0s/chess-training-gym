@@ -7,6 +7,8 @@ from .dataset import read_jsonl, write_jsonl
 
 
 def generate_game(seed, game_id=0, max_plies=80):
+    if max_plies <= 0:
+        raise ValueError(f"max_plies must be positive, got {max_plies}")
     rng = random.Random(int(seed) * 1000003 + int(game_id))
     state = parse_fen(START_FEN)
     moves = []
@@ -33,6 +35,10 @@ def generate_game(seed, game_id=0, max_plies=80):
 
 def generate_games(num_games=10, seed=0, max_plies=80, **kwargs):
     n = kwargs.get("n", num_games)
+    if n <= 0:
+        raise ValueError(f"num_games must be positive, got {n}")
+    if max_plies <= 0:
+        raise ValueError(f"max_plies must be positive, got {max_plies}")
     return [generate_game(seed, i, max_plies) for i in range(n)]
 
 

@@ -45,6 +45,8 @@ def pearson_correlation(pred_values, true_values):
 
 
 def build_synthetic_dataset(num_positions=50, seed=0):
+    if num_positions <= 0:
+        raise ValueError(f"num_positions must be positive, got {num_positions}")
     import random
 
     rng = random.Random(seed)

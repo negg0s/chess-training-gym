@@ -11,9 +11,13 @@ PIECE_PLANES = {
 
 
 def parse_fen(fen):
+    if not isinstance(fen, str):
+        raise ValueError(f"FEN must be a string, got {type(fen).__name__}")
     parts = fen.split()
     if not parts:
         raise ValueError("empty FEN")
+    if len(parts) != 6:
+        raise ValueError(f"FEN must contain exactly 6 fields, got {len(parts)}")
     rows = parts[0].split("/")
     if len(rows) != 8:
         raise ValueError("FEN placement must have 8 rows")
@@ -32,11 +36,11 @@ def parse_fen(fen):
         if len(r) != 8:
             raise ValueError("FEN row must describe 8 squares")
         board.append(r)
-    side = parts[1] if len(parts) > 1 else "w"
+    side = parts[1]
     if side not in ("w", "b"):
         raise ValueError(f"invalid side to move: {side!r}")
-    castling = parts[2] if len(parts) > 2 else "-"
-    ep = parts[3] if len(parts) > 3 else "-"
+    castling = parts[2]
+    ep = parts[3]
     if castling != "-" and (
         any(right not in "KQkq" for right in castling)
         or len(set(castling)) != len(castling)
@@ -47,8 +51,8 @@ def parse_fen(fen):
         if len(ep) != 2 or ep[0] not in "abcdefgh" or ep[1] != valid_ep_rank:
             raise ValueError(f"invalid en passant square: {ep!r}")
     try:
-        halfmove = int(parts[4]) if len(parts) > 4 else 0
-        fullmove = int(parts[5]) if len(parts) > 5 else 1
+        halfmove = int(parts[4])
+        fullmove = int(parts[5])
     except ValueError as exc:
         raise ValueError("FEN move counters must be integers") from exc
     if halfmove < 0 or fullmove < 1:

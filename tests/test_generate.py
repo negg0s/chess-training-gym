@@ -26,3 +26,19 @@ def test_write_read_roundtrip():
     loaded = read_games(path)
     assert loaded == games
     os.remove(path)
+
+
+def test_invalid_ranges_rejected():
+    import pytest
+
+    with pytest.raises(ValueError, match="num_games must be positive"):
+        generate_games(num_games=0)
+
+    with pytest.raises(ValueError, match="num_games must be positive"):
+        generate_games(num_games=-3)
+
+    with pytest.raises(ValueError, match="max_plies must be positive"):
+        generate_games(num_games=2, max_plies=0)
+
+    with pytest.raises(ValueError, match="max_plies must be positive"):
+        generate_game(seed=42, max_plies=0)
