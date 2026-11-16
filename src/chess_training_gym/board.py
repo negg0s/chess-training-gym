@@ -57,6 +57,30 @@ def parse_fen(fen):
         raise ValueError("FEN move counters must be integers") from exc
     if halfmove < 0 or fullmove < 1:
         raise ValueError("FEN move counters must be non-negative and fullmove must be positive")
+
+    # Validate pawn placement (pawns cannot be on rank 1 or 8)
+    if any(p in "Pp" for p in board[0] + board[7]):
+        raise ValueError("pawns cannot be on rank 1 or rank 8")
+
+    # Validate king counts
+    w_kings = sum(row.count("K") for row in board)
+    b_kings = sum(row.count("k") for row in board)
+    if w_kings != 1:
+        raise ValueError(f"FEN must contain exactly 1 white king, found {w_kings}")
+    if b_kings != 1:
+        raise ValueError(f"FEN must contain exactly 1 black king, found {b_kings}")
+
+    w_king_pos = find_king(board, "w")
+    b_king_pos = find_king(board, "b")
+    if max(abs(w_king_pos[0] - b_king_pos[0]), abs(w_king_pos[1] - b_king_pos[1])) <= 1:
+        raise ValueError("kings cannot be adjacent to each other")
+
+    # Side not to move cannot already be in check
+    opp = "b" if side == "w" else "w"
+    opp_king = b_king_pos if opp == "b" else w_king_pos
+    if is_attacked(board, opp_king[0], opp_king[1], side):
+        raise ValueError("side not to move cannot be in check")
+
     return {
         "board": board,
         "side": side,
@@ -302,7 +326,25 @@ def _sq_to_rc(sq):
     return r, c
 
 
-def apply_uci(state, uci):
+def is_legal_move(state, uci):
+    """Return True if the given UCI move is legal in state."""
+    return uci in legal_moves(state)
+
+
+def validate_move(state, uci):
+    """Ensure the given UCI move is legal, raising ValueError if not."""
+    if not isinstance(uci, str) or len(uci) < 4 or len(uci) > 5:
+        raise ValueError(f"invalid UCI move format: {uci!r}")
+    if not is_legal_move(state, uci):
+        raise ValueError(f"illegal move {uci!r} in position {to_fen(state)}")
+    return uci
+
+
+def apply_uci(state, uci, validate=False):
+    if not isinstance(uci, str) or len(uci) < 4 or len(uci) > 5:
+        raise ValueError(f"invalid UCI move format: {uci!r}")
+    if validate:
+        validate_move(state, uci)
     state = copy.deepcopy(state)
     board = state["board"]
     side = state["side"]

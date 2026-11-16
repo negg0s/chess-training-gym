@@ -91,6 +91,13 @@ def compute_stats(records):
             positions += len(record["positions"])
             positions_known = True
     games = len(records)
+    white_wins = results.get("1-0", 0)
+    black_wins = results.get("0-1", 0)
+    draws = results.get("1/2-1/2", 0)
+    white_win_rate = (white_wins + 0.5 * draws) / games if games > 0 else 0.0
+    black_win_rate = (black_wins + 0.5 * draws) / games if games > 0 else 0.0
+    draw_rate = draws / games if games > 0 else 0.0
+
     return {
         "games": games,
         "positions": positions if positions_known else None,
@@ -98,8 +105,30 @@ def compute_stats(records):
         "min_game_length": min(lengths) if lengths else 0,
         "max_game_length": max(lengths) if lengths else 0,
         "total_plies": sum(lengths),
-        "white_wins": results.get("1-0", 0),
-        "black_wins": results.get("0-1", 0),
-        "draws": results.get("1/2-1/2", 0),
+        "white_wins": white_wins,
+        "black_wins": black_wins,
+        "draws": draws,
+        "white_win_rate": white_win_rate,
+        "black_win_rate": black_win_rate,
+        "draw_rate": draw_rate,
         "result_distribution": dict(sorted(results.items())),
     }
+
+
+def calculate_win_rate(records, perspective="white"):
+    """Compute score / win rate for white or black with zero-division safety.
+
+    Draws contribute 0.5 points. Empty records return 0.0 without errors.
+    """
+    if not records:
+        return 0.0
+    stats = compute_stats(records) if isinstance(records, list) else records
+    games = stats.get("games", 0)
+    if games <= 0:
+        return 0.0
+    if perspective == "white":
+        return stats.get("white_win_rate", 0.0)
+    if perspective == "black":
+        return stats.get("black_win_rate", 0.0)
+    raise ValueError(f"perspective must be 'white' or 'black', got {perspective!r}")
+

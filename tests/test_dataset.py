@@ -1,6 +1,7 @@
 import json
 
 from chess_training_gym.dataset import (
+    calculate_win_rate,
     compute_stats,
     read_jsonl,
     split_records,
@@ -71,3 +72,32 @@ def test_jsonl_roundtrip_skips_metadata(tmp_path):
     lines = path.read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[0])["type"] == "metadata"
     assert read_jsonl(path) == records
+
+
+def test_win_rate_and_empty_dataset():
+    # Empty dataset does not raise ZeroDivisionError
+    empty_stats = compute_stats([])
+    assert empty_stats["games"] == 0
+    assert empty_stats["white_win_rate"] == 0.0
+    assert empty_stats["black_win_rate"] == 0.0
+    assert empty_stats["draw_rate"] == 0.0
+    assert calculate_win_rate([]) == 0.0
+    assert calculate_win_rate(empty_stats) == 0.0
+
+    games = [
+        {"result": "1-0"},
+        {"result": "1-0"},
+        {"result": "0-1"},
+        {"result": "1/2-1/2"},
+    ]
+    summary = compute_stats(games)
+    assert summary["games"] == 4
+    # White: 2 wins + 0.5 draws = 2.5 / 4 = 0.625
+    assert summary["white_win_rate"] == 0.625
+    # Black: 1 win + 0.5 draws = 1.5 / 4 = 0.375
+    assert summary["black_win_rate"] == 0.375
+    assert summary["draw_rate"] == 0.25
+
+    assert calculate_win_rate(games, perspective="white") == 0.625
+    assert calculate_win_rate(games, perspective="black") == 0.375
+

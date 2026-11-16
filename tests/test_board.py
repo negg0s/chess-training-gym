@@ -111,9 +111,40 @@ def test_invalid_fen_rejected():
         "8/8/8/8/8/8/8/8 w - z9 0 1",
         "8/8/8/8/8/8/8/8 w - - -1 1",
         "8/8/8/8/8/8/8/8 w - - 0 0",
+        # Illegal king positions
+        "8/8/8/8/8/8/8/8 w - - 0 1",  # No kings
+        "4K3/8/8/8/8/8/8/8 w - - 0 1",  # Only white king
+        "4k3/8/8/8/8/8/8/8 w - - 0 1",  # Only black king
+        "4K3/8/8/8/8/8/8/4K2k w - - 0 1",  # Two white kings
+        "4k3/8/8/8/8/8/8/4k2K w - - 0 1",  # Two black kings
+        "4kK2/8/8/8/8/8/8/8 w - - 0 1",  # Adjacent kings
+        "4k3/4R3/8/8/8/8/8/4K3 w - - 0 1",  # Side not to move is in check
+        "p7/8/8/8/8/8/8/4K2k w - - 0 1",  # Pawn on rank 8
+        "4K2k/8/8/8/8/8/8/P7 w - - 0 1",  # Pawn on rank 1
     ):
         try:
             parse_fen(fen)
         except ValueError:
             continue
         raise AssertionError(f"accepted invalid FEN: {fen!r}")
+
+
+def test_move_validation():
+    import pytest
+    from chess_training_gym.board import is_legal_move, validate_move
+
+    state = parse_fen(START_FEN)
+    assert is_legal_move(state, "e2e4")
+    assert not is_legal_move(state, "e2e5")
+    assert not is_legal_move(state, "e7e5")  # Black piece on white's turn
+
+    assert validate_move(state, "e2e4") == "e2e4"
+    with pytest.raises(ValueError, match="illegal move"):
+        validate_move(state, "e2e5")
+
+    with pytest.raises(ValueError, match="illegal move"):
+        apply_uci(state, "e2e5", validate=True)
+
+    with pytest.raises(ValueError, match="invalid UCI"):
+        apply_uci(state, "bad")
+

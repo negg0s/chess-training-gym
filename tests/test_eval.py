@@ -2,6 +2,7 @@ from chess_training_gym.eval import (
     build_synthetic_dataset,
     evaluate_model,
     evaluate_predictions,
+    normalize_scores,
     top_k_accuracy,
     value_correlation,
 )
@@ -90,4 +91,20 @@ def test_build_synthetic_dataset_zero_range():
 
     with pytest.raises(ValueError, match="num_positions must be positive"):
         build_synthetic_dataset(num_positions=-10)
+
+
+def test_normalize_scores_zero_division():
+    # Empty list
+    assert normalize_scores([]) == []
+
+    # Single score (cannot divide by zero span)
+    assert normalize_scores([5.0]) == [0.0]
+
+    # Identical scores (span is zero, division by zero handled)
+    assert normalize_scores([10.0, 10.0, 10.0]) == [0.0, 0.0, 0.0]
+
+    # Normal range
+    res = normalize_scores([0.0, 50.0, 100.0], min_val=0.0, max_val=1.0)
+    assert res == [0.0, 0.5, 1.0]
+
 

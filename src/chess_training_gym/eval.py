@@ -44,6 +44,23 @@ def pearson_correlation(pred_values, true_values):
     return value_correlation(pred_values, true_values)
 
 
+def normalize_scores(scores, min_val=-1.0, max_val=1.0):
+    """Normalize a list of evaluation scores into [min_val, max_val].
+
+    Returns empty list on empty input, and zeros if all values are identical
+    or min_val equals max_val, avoiding zero division errors.
+    """
+    if not scores:
+        return []
+    clean = [float(s) for s in scores]
+    s_min = min(clean)
+    s_max = max(clean)
+    if s_min == s_max or min_val == max_val:
+        return [0.0] * len(clean)
+    scale = (max_val - min_val) / (s_max - s_min)
+    return [min_val + (s - s_min) * scale for s in clean]
+
+
 def build_synthetic_dataset(num_positions=50, seed=0):
     if num_positions <= 0:
         raise ValueError(f"num_positions must be positive, got {num_positions}")
